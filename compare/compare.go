@@ -27,26 +27,36 @@ func Reverse[T any](o Ordering[T]) Ordering[T] {
 	}
 }
 
-type Ordered[T any] interface {
+// Orderer is an interface defining an ordering on elements of type T.
+// Before(t) returns true if the receiver comes before t.
+type Orderer[T any] interface {
 	Before(t T) bool
-} 
+}
 
-func DefaultOrdering[T Ordered[T]](t1, t2 T) bool {
+// DefaultOrdering is the standard Ordering for Ordered types.
+func DefaultOrdering[T Orderer[T]](t1, t2 T) bool {
 	return t1.Before(t2)
 }
 
+// A Comparator returns true if t1 == t2.
+//
+// For any Comparator C, and elements t1, t2, and t3, the following must hold:
+//  - C(t1, t1) == true
+//  - If C(t1,t2) == true then C(t2,t1) == true
+//  - If C(t1,t2) == true and C(t2, t3) == true then C(t1, t3) == true
 type Comparator[T any] func(t1, t2 T) bool
 
+// Equals is the default Comparator for comparable types.
 func Equals[T comparable](t1, t2 T) bool {
 	return t1 == t2
 }
 
-type Comparable[T any] interface {
+// Equater is an interface that wraps the Equals() method.
+type Equater[T any] interface {
 	Equals(t T) bool
 }
 
-func DefaultComparator[T Comparable[T]](t1, t2 T) bool {
+// DefaultComparator is the default Comparator for Equalers.
+func DefaultComparator[T Equater[T]](t1, t2 T) bool {
 	return t1.Equals(t2)
 }
-
-
