@@ -83,21 +83,32 @@ type LinkedHashMap[K Hashable, V any] struct {
 	head, tail *linkedHashMapEntry[K, V]
 }
 
-func (m *LinkedHashMap[K, V]) rehash() {
-	tmpEntries := m.entries
-	m.entries = make([]linkedHashMapEntry[K, V], m.cap)
-	m.size, m.nkeys = 0, 0
-	for _, e := range tmpEntries {
-		if e.key == nil || e.value == nil {
-			continue
+func (m *LinkedHashMap[K, V]) maybeResizeAndRehash() {
+	if float64(m.nkeys)/float64(m.cap) > loadFactor {
+		// If most of the space is taken by tombstones, keep the same capacity
+		// and rehash to clear the tombstones. Otherwise, double the capacity.
+		if m.nkeys < m.size*2 {
+			if m.cap<<1 < baseTableCap {
+				panic("LinkedHashMap capacity out-of-range")
+			}
+			m.cap <<= 1
 		}
-		m.emplace(e)
+
+		tmpEntries := m.entries
+		m.entries = make([]linkedHashMapEntry[K, V], m.cap)
+		m.size, m.nkeys = 0, 0
+		for _, e := range tmpEntries {
+			if e.key == nil || e.value == nil {
+				continue
+			}
+			m.emplace(e)
+		}
 	}
 }
 
 func (m *LinkedHashMap[K, V]) emplace(entry linkedHashMapEntry[K, V]) {
 	if m.cap == m.nkeys {
-		m.rehash()
+		m.maybeResizeAndRehash()
 	}
 
 	capMask := m.cap - 1
@@ -120,17 +131,7 @@ func (m *LinkedHashMap[K, V]) emplace(entry linkedHashMapEntry[K, V]) {
 	}
 	if step >= stepCheck {
 		// lots of collisions; check if rehash is needed
-		if float64(m.nkeys)/float64(m.cap) > loadFactor {
-			// If most of the space is taken by tombstones, keep the same capacity
-			// and rehash to clear the tombstones. Otherwise, double the capacity.
-			if m.nkeys < m.size*2 {
-				if m.cap<<1 < baseTableCap {
-					panic("LinkedHashMap capacity out-of-range")
-				}
-				m.cap <<= 1
-			}
-			m.rehash()
-		}
+		m.maybeResizeAndRehash()
 	}
 }
 
@@ -169,10 +170,6 @@ func (m *LinkedHashMap[K, V]) Get(key K) (val V, ok bool) {
 }
 
 func (m *LinkedHashMap[K, V]) Delete(key K) {
-	var zero K
-	if m.comparator(key, zero) {
-		return
-	}
 	capMask := m.cap - 1
 	h := hash(&m.hash, key)
 	step := 0
@@ -209,6 +206,7 @@ func (m *LinkedHashMap[K, V]) Has(key K) bool {
 		if h == currEntry.hashCache && m.comparator(*currEntry.key, key) {
 			return currEntry.value != nil
 		}
+		step++
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	baseTableCap = 1 << 3 // lower this to test resizing easier.
+	baseTableCap = 4 // lower this to test resizing easier.
 }
 
 type testKey int
@@ -25,10 +25,11 @@ func TestKVMaps(t *testing.T) {
 	tcs := []struct {
 		name string
 		m    Interface[testKey, string]
-	}{{
-		name: "LinkedHashMap",
-		m:    NewComparableLinkedHashMap[testKey, string](),
-	},
+	}{
+		{
+			name: "LinkedHashMap",
+			m:    NewComparableLinkedHashMap[testKey, string](),
+		},
 		{
 			name: "TreeMap",
 			m:    NewOrderedTreeMap[testKey, string](),
@@ -36,11 +37,11 @@ func TestKVMaps(t *testing.T) {
 		{
 			name: "MapWrapper",
 			m:    MapWrapper[testKey, string](make(map[testKey]string)),
-		}}
+		},
+	}
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			if !t.Run("Insertion", func(t *testing.T) {
 				kvPairs := []struct {
 					K testKey
