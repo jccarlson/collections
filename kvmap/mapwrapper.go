@@ -1,10 +1,33 @@
 package kvmap
 
-import "github.org/jccarlson/collections"
+import (
+	"github.org/jccarlson/collections"
+	"github.org/jccarlson/collections/internal"
+)
+
+func initMapWrapperOptions(opts []Option) kvMapOpts {
+	r := kvMapOpts{capacity: -1}
+
+	for _, opt := range opts {
+		opt.setOpt(&r)
+	}
+	return r
+}
 
 // MapWrapper wraps a built-in map with the Map and
 // Iterator interfaces.
 type MapWrapper[K comparable, V any] map[K]V
+
+// NewMapWrapper returns an MapWrapper wrapping a new, empty map. The only
+// supported Option is Capacity(), which sets the initial capacity of the
+// underlying map. Options other than Capacity are ignored.
+func NewMapWrapper[K comparable, V any](opts ...Option) MapWrapper[K, V] {
+	o := initMapWrapperOptions(opts)
+	if o.capacity >= 0 {
+		return MapWrapper[K, V](make(map[K]V, o.capacity))
+	}
+	return MapWrapper[K, V](make(map[K]V))
+}
 
 func (m MapWrapper[K, V]) Put(key K, val V) {
 	m[key] = val
@@ -25,11 +48,11 @@ func (m MapWrapper[K, V]) Has(key K) bool {
 }
 
 func (m MapWrapper[K, V]) String() string {
-	return iterableMapToString[K, V](m)
+	return IterableMapToString[K, V](m)
 }
 
 func (m MapWrapper[K, V]) GoString() string {
-	return iterableMapToGoString[K, V](m)
+	return IterableMapToGoString[K, V](m)
 }
 
 func (m MapWrapper[K, V]) Len() int {
@@ -37,17 +60,21 @@ func (m MapWrapper[K, V]) Len() int {
 }
 
 func (m MapWrapper[K, V]) Iterator() collections.Iterator[Entry[K, V]] {
-	i := make(chan Entry[K, V])
+
+	sender, it := internal.NewChanIteratorPair[Entry[K, V]]()
 	go func() {
 		for k, v := range m {
-			i <- &wrapperEntry[K, V]{k, v}
+			if !sender.Send(&wrapperEntry[K, V]{map[K]V(m), k, v}) {
+				break
+			}
 		}
-		close(i)
+		sender.Close()
 	}()
-	return entryChanIterator[K, V](i)
+	return it
 }
 
 type wrapperEntry[K comparable, V any] struct {
+	m     map[K]V
 	key   K
 	value V
 }
@@ -57,4 +84,8 @@ func (e *wrapperEntry[K, V]) Key() K {
 }
 func (e *wrapperEntry[K, V]) Value() V {
 	return e.value
+}
+func (e *wrapperEntry[K, V]) SetValue(v V) {
+	e.value = v
+	e.m[e.key] = v
 }

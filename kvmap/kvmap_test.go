@@ -5,10 +5,6 @@ import (
 	"unsafe"
 )
 
-func init() {
-	baseTableCap = 4 // lower this to test resizing easier.
-}
-
 type testKey int
 
 func (t testKey) HashBytes() []byte {
@@ -21,22 +17,38 @@ func (t testKey) HashBytes() []byte {
 	return b
 }
 
+func (t testKey) Equals(other testKey) bool {
+	return t == other
+}
+
+func (t testKey) Before(other testKey) bool {
+	return t < other
+}
+
 func TestKVMaps(t *testing.T) {
 	tcs := []struct {
 		name string
-		m    Interface[testKey, string]
+		m    IterableMap[testKey, string]
 	}{
 		{
-			name: "LinkedHashMap",
-			m:    NewComparableLinkedHashMap[testKey, string](),
+			name: "ComparableLinkedHashMap",
+			m:    NewComparableLinkedHashMap[testKey, string](Capacity(5), LoadFactor(1)),
 		},
 		{
-			name: "TreeMap",
-			m:    NewOrderedTreeMap[testKey, string](),
+			name: "HashableKeyLinkedHashMap",
+			m:    NewHashableKeyLinkedHashMap[testKey, string](LoadFactor(.1)),
+		},
+		{
+			name: "OrderedKeyTreeMap",
+			m:    NewOrderedMap[testKey, string](),
+		},
+		{
+			name: "OrderableKeyTreeMap",
+			m:    NewOrderedMapWithOrderableKeys[testKey, string](),
 		},
 		{
 			name: "MapWrapper",
-			m:    MapWrapper[testKey, string](make(map[testKey]string)),
+			m:    NewMapWrapper[testKey, string](Capacity(0)),
 		},
 	}
 
@@ -70,10 +82,11 @@ func TestKVMaps(t *testing.T) {
 				}
 
 				if l := tc.m.Len(); l != 9 {
-					t.Errorf("Want Len() == 9, Got %d", l)
+
+					t.Errorf("Want Len() == 9, Got %d for map: %#v", l, tc.m)
 				}
 			}) {
-				t.Skip("Insertion test failed... Skipping deletion test")
+				t.Skip("Insertion test failed... Skipping following tests")
 			}
 
 			t.Run("Deletion", func(t *testing.T) {
@@ -90,7 +103,31 @@ func TestKVMaps(t *testing.T) {
 				}
 
 				if l := tc.m.Len(); l != 6 {
-					t.Errorf("Want Len() == 6, Got %d", l)
+					t.Errorf("Want Len() == 6, Got %d; map: %#v", l, tc.m)
+				}
+			})
+			t.Run("IteratorEntryValuesMutable", func(t *testing.T) {
+
+				it := tc.m.Iterator()
+				expected := map[testKey]string{
+					2000000: "two million",
+					1:       "one",
+					16:      "sixteen",
+					-400:    "negative four-hundred",
+					80:      "eighty",
+					100:     "one-hundred",
+				}
+				for entry, ok := it.Next(); ok; entry, ok = it.Next() {
+					k, v := entry.Key(), entry.Value()
+					if v != expected[k] {
+						t.Errorf("Want: Entry{%d, %s}, Got: {%[1]d, %[3]s}", k, expected[k], v)
+					}
+					entry.SetValue("mutated")
+				}
+				for key := range expected {
+					if v, ok := tc.m.Get(key); !ok || v != "mutated" {
+						t.Errorf(`Want Get(%d) == ("mutated", true), Got (%q, %t)`, key, v, ok)
+					}
 				}
 			})
 		})
