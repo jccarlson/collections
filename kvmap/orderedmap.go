@@ -1,9 +1,10 @@
 package kvmap
 
 import (
+	"iter"
+
 	"golang.org/x/exp/constraints"
 
-	"github.org/jccarlson/collections"
 	"github.org/jccarlson/collections/compare"
 	"github.org/jccarlson/collections/internal/ds"
 )
@@ -61,10 +62,16 @@ func NewOrderedMapWithOrdering[K, V any](ordering compare.Ordering[K]) *OrderedM
 // V, which iterates over entries in key order.
 type OrderedMap[K, V any] ds.RedBlackTree[Entry[K, V]]
 
+// Put adds a key-value pair to the wrapped map.
 func (m *OrderedMap[K, V]) Put(key K, value V) {
-	(*ds.RedBlackTree[Entry[K, V]])(m).Put(&orderedMapEntry[K, V]{key: key, value: &value})
+	(*ds.RedBlackTree[Entry[K, V]])(m).Put(&orderedMapEntry[K, V]{
+		key:   key,
+		value: &value,
+	})
 }
 
+// Get returns the value for the given key and ok == true if present, and ok ==
+// false if not.
 func (m *OrderedMap[K, V]) Get(key K) (value V, ok bool) {
 	entry, ok := (*ds.RedBlackTree[Entry[K, V]])(m).Get(&orderedMapEntry[K, V]{key: key})
 	if ok {
@@ -73,24 +80,31 @@ func (m *OrderedMap[K, V]) Get(key K) (value V, ok bool) {
 	return value, ok
 }
 
+// Has returns true if the given key is present in the map.
 func (m *OrderedMap[K, V]) Has(key K) bool {
 	return (*ds.RedBlackTree[Entry[K, V]])(m).Has(&orderedMapEntry[K, V]{key: key})
 }
 
+// Delete removes the value for the given key if present.
 func (m *OrderedMap[K, V]) Delete(key K) {
 	(*ds.RedBlackTree[Entry[K, V]])(m).Delete(&orderedMapEntry[K, V]{key: key})
 }
 
+// Len returns the number of key-value pairs in the map.
 func (m *OrderedMap[K, V]) Len() int {
 	return (*ds.RedBlackTree[Entry[K, V]])(m).Len()
 }
 
+// String returns a string representation of the map which is similar to the
+// built-in map String() representation.
 func (m *OrderedMap[K, V]) String() string {
-	return IterableMapToString[K, V](m)
+	return IterableMapToString(m)
 }
 
+// GoString returns a string representation of the map which is similar to the
+// built-in map GoString() representation.
 func (m *OrderedMap[K, V]) GoString() string {
-	return IterableMapToGoString[K, V](m)
+	return IterableMapToGoString(m)
 }
 
 type orderedMapIterator[K, V any] struct {
@@ -98,7 +112,7 @@ type orderedMapIterator[K, V any] struct {
 	tn        *ds.TreeNode[Entry[K, V]]
 }
 
-func (i *orderedMapIterator[K, V]) Next() (e Entry[K, V], ok bool) {
+func (i *orderedMapIterator[K, V]) next() (e Entry[K, V], ok bool) {
 	if i.tn == nil {
 		return
 	}
@@ -107,10 +121,67 @@ func (i *orderedMapIterator[K, V]) Next() (e Entry[K, V], ok bool) {
 	return e, true
 }
 
-func (m *OrderedMap[K, V]) Iterator() collections.Iterator[Entry[K, V]] {
-	return &orderedMapIterator[K, V]{direction: ds.Right, tn: (*ds.RedBlackTree[Entry[K, V]])(m).First()}
+// All returns an iterator which yields the key-value pairs of the map in
+// order.
+func (m *OrderedMap[K, V]) All() iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		it := &orderedMapIterator[K, V]{
+			direction: ds.Right,
+			tn:        (*ds.RedBlackTree[Entry[K, V]])(m).First(),
+		}
+		for e, ok := it.next(); ok; e, ok = it.next() {
+			if !yield(e.Key(), e.Value()) {
+				return
+			}
+		}
+	}
 }
 
-func (m *OrderedMap[K, V]) ReverseIterator() collections.Iterator[Entry[K, V]] {
-	return &orderedMapIterator[K, V]{direction: ds.Left, tn: (*ds.RedBlackTree[Entry[K, V]])(m).Last()}
+// Backwards returns an iterator which yields the key-value pairs of the map in
+// reverse order.
+func (m *OrderedMap[K, V]) Backwards() iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		it := &orderedMapIterator[K, V]{
+			direction: ds.Left,
+			tn:        (*ds.RedBlackTree[Entry[K, V]])(m).Last(),
+		}
+		for e, ok := it.next(); ok; e, ok = it.next() {
+			if !yield(e.Key(), e.Value()) {
+				return
+			}
+		}
+	}
+}
+
+// Entries returns an iterator which yields the key-value pairs wrapped in the
+// Entry interface in order, which allows values to be modified via SetValue.
+func (m *OrderedMap[K, V]) Entries() iter.Seq[Entry[K, V]] {
+	return func(yield func(Entry[K, V]) bool) {
+		it := &orderedMapIterator[K, V]{
+			direction: ds.Right,
+			tn:        (*ds.RedBlackTree[Entry[K, V]])(m).First(),
+		}
+		for e, ok := it.next(); ok; e, ok = it.next() {
+			if !yield(e) {
+				return
+			}
+		}
+	}
+}
+
+// EntriesBackwards returns an iterator which yields the key-value pairs
+// wrapped in the Entry interface in reverse order, which allows values to be
+// modified via SetValue.
+func (m *OrderedMap[K, V]) EntriesBackwards() iter.Seq[Entry[K, V]] {
+	return func(yield func(Entry[K, V]) bool) {
+		it := &orderedMapIterator[K, V]{
+			direction: ds.Left,
+			tn:        (*ds.RedBlackTree[Entry[K, V]])(m).Last(),
+		}
+		for e, ok := it.next(); ok; e, ok = it.next() {
+			if !yield(e) {
+				return
+			}
+		}
+	}
 }

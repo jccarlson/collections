@@ -1,6 +1,9 @@
 package kvmap
 
 import (
+	"fmt"
+	"iter"
+	"math/rand"
 	"testing"
 	"unsafe"
 )
@@ -50,6 +53,10 @@ func TestKVMaps(t *testing.T) {
 			name: "MapWrapper",
 			m:    NewMapWrapper[testKey, string](Capacity(0)),
 		},
+		{
+			name: "BuiltinLinkedHashMap",
+			m:    NewBuiltInLinkedHashMap[testKey, string](Capacity(5)),
+		},
 	}
 
 	for _, tc := range tcs {
@@ -90,7 +97,7 @@ func TestKVMaps(t *testing.T) {
 			}
 
 			t.Run("Deletion", func(t *testing.T) {
-				keys := []testKey{5, -1, 0}
+				keys := []testKey{5, -1, 5, 0}
 
 				for _, k := range keys {
 					tc.m.Delete(k)
@@ -98,7 +105,7 @@ func TestKVMaps(t *testing.T) {
 						t.Errorf("Delete(%d); Want Has(%[1]d) == false, Got true", k)
 					}
 					if v, ok := tc.m.Get(k); ok || v != "" {
-						t.Errorf(`Delete(%d); Want Get(%[1]d) == ("", false), Got (%s, %t)`, k, v, ok)
+						t.Errorf(`Delete(%d); Want Get(%[1]d) == ("", false), Got (%q, %t)`, k, v, ok)
 					}
 				}
 
@@ -107,8 +114,13 @@ func TestKVMaps(t *testing.T) {
 				}
 			})
 			t.Run("IteratorEntryValuesMutable", func(t *testing.T) {
+				entriesInterface, ok := tc.m.(interface {
+					Entries() iter.Seq[Entry[testKey, string]]
+				})
+				if !ok {
+					t.Skipf("kvmap type %T does not support iterable Entries()", tc.m)
+				}
 
-				it := tc.m.Iterator()
 				expected := map[testKey]string{
 					2000000: "two million",
 					1:       "one",
@@ -117,19 +129,49 @@ func TestKVMaps(t *testing.T) {
 					80:      "eighty",
 					100:     "one-hundred",
 				}
-				for entry, ok := it.Next(); ok; entry, ok = it.Next() {
+
+				for entry := range entriesInterface.Entries() {
 					k, v := entry.Key(), entry.Value()
 					if v != expected[k] {
 						t.Errorf("Want: Entry{%d, %s}, Got: {%[1]d, %[3]s}", k, expected[k], v)
 					}
 					entry.SetValue("mutated")
 				}
+
 				for key := range expected {
 					if v, ok := tc.m.Get(key); !ok || v != "mutated" {
 						t.Errorf(`Want Get(%d) == ("mutated", true), Got (%q, %t)`, key, v, ok)
 					}
 				}
 			})
+		})
+	}
+}
+
+func BenchmarkLinkedHashMaps(b *testing.B) {
+	for _, getNewMap := range []func() IterableMap[int, int]{
+		func() IterableMap[int, int] { return NewComparableLinkedHashMap[int, int]() },
+		func() IterableMap[int, int] { return NewBuiltInLinkedHashMap[int, int]() },
+	} {
+		b.Run(fmt.Sprintf("type-%T", getNewMap()), func(b *testing.B) {
+
+			// Setup values to be inserted and deleted.
+			rng := rand.New(rand.NewSource(0xDeadBeef))
+			putVals := make([]int, b.N)
+			delVals := make([]int, b.N)
+			for i := range b.N {
+				putVals[i] = rng.Intn(1000)
+				delVals[i] = rng.Intn(1000)
+			}
+
+			testMap := getNewMap()
+			b.ResetTimer()
+
+			// Benchmark Put/Delete.
+			for i := range b.N {
+				testMap.Put(putVals[i], putVals[i])
+				testMap.Delete(delVals[i])
+			}
 		})
 	}
 }

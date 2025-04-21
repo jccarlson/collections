@@ -2,9 +2,8 @@ package kvmap
 
 import (
 	"fmt"
+	"iter"
 	"strings"
-
-	"github.org/jccarlson/collections"
 )
 
 // Interface is the interface common to all key-value maps in package kvmap.
@@ -29,7 +28,7 @@ type Entry[K, V any] interface {
 // (implementing Interface) and Iterable over its entries.
 type IterableMap[K, V any] interface {
 	Interface[K, V]
-	Iterator() collections.Iterator[Entry[K, V]]
+	All() iter.Seq2[K, V]
 }
 
 type kvMapOpts struct {
@@ -79,30 +78,16 @@ func LoadFactor(loadFactor float32) Option {
 	return loadFactorOpt(loadFactor)
 }
 
-// ForEach calls f(key, value) for each key-value pair in m.
-func ForEach[K, V any](m IterableMap[K, V], f func(key K, val V)) {
-	it := m.Iterator()
-	for e, ok := it.Next(); ok; e, ok = it.Next() {
-		f(e.Key(), e.Value())
-	}
-}
-
 // Prints the provided IterableMap to a string. Can be used to easily implement
 // the String() method for IterableMap types.
 func IterableMapToString[K, V any](m IterableMap[K, V]) string {
 	sb := &strings.Builder{}
-	sb.WriteString("map[")
-	it := m.Iterator()
-	e, ok := it.Next()
-	eToStr := func(e Entry[K, V]) string {
-		return fmt.Sprintf("%v:%v", e.Key(), e.Value())
-	}
-	if ok {
-		sb.WriteString(eToStr(e))
-	}
-	for e, ok = it.Next(); ok; e, ok = it.Next() {
-		sb.WriteRune(' ')
-		sb.WriteString(eToStr(e))
+	sb.WriteString("map")
+	delim := '['
+	for k, v := range m.All() {
+		sb.WriteRune(delim)
+		sb.WriteString(fmt.Sprintf("%v:%v", k, v))
+		delim = ' '
 	}
 	sb.WriteRune(']')
 	return sb.String()
@@ -112,18 +97,12 @@ func IterableMapToString[K, V any](m IterableMap[K, V]) string {
 // used to easily implement the GoString() method for IterableMap types.
 func IterableMapToGoString[K, V any](m IterableMap[K, V]) string {
 	sb := &strings.Builder{}
-	sb.WriteString(fmt.Sprintf("%T{", m))
-	it := m.Iterator()
-	e, ok := it.Next()
-	eToStr := func(e Entry[K, V]) string {
-		return fmt.Sprintf("%#v:%#v", e.Key(), e.Value())
-	}
-	if ok {
-		sb.WriteString(eToStr(e))
-	}
-	for e, ok = it.Next(); ok; e, ok = it.Next() {
-		sb.WriteString(", ")
-		sb.WriteString(eToStr(e))
+	sb.WriteString(fmt.Sprintf("%T", m))
+	delim := "{"
+	for k, v := range m.All() {
+		sb.WriteString(delim)
+		sb.WriteString(fmt.Sprintf("%#v:%#v", k, v))
+		delim = ", "
 	}
 	sb.WriteRune('}')
 	return sb.String()

@@ -1,4 +1,4 @@
-//go:build !robinhoodprobing
+//go:build robinhoodprobing
 
 package kvmap
 
@@ -16,6 +16,7 @@ type linkedHashMapEntry[K any, V any] struct {
 	value *V
 
 	hashCache uint64
+	psl       int
 
 	prev, next *linkedHashMapEntry[K, V]
 }
@@ -42,8 +43,7 @@ func initLinkedHashMapOptions(opts []Option) kvMapOpts {
 		opt.setOpt(&r)
 	}
 
-	// Round capacity up to a power of 2 (otherwise quadratic probing fails),
-	// with a min cap of 8.
+	// Round capacity up to a power of 2 with a min cap of 8.
 	n := r.capacity
 	for cap := minCap; cap > 0; cap <<= 1 {
 		if cap >= n {
@@ -128,9 +128,9 @@ func NewCustomLinkedHashMap[K any, V any](comparator compare.Comparator[K], mapH
 }
 
 // LinkedHashMap is a hash map which can store keys and values of any type, and
-// can iterate over inserted key-value pairs in insertion-order. LinkedHashMap
-// supports the Capacity() (default: 32) and the LoadFactor() (default: 0.75)
-// Options; other Options will panic.
+// can iterate over inserted key-value pairs in insertion-order (and reverse).
+// LinkedHashMap supports the Capacity() (default: 32) and the LoadFactor()
+// (default: 0.75) Options; other Options are ignored.
 type LinkedHashMap[K any, V any] struct {
 	comparator compare.Comparator[K]
 	hash       MapHasher[K]

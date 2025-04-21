@@ -2,6 +2,7 @@ package kvmap
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -67,63 +68,17 @@ type NonFixedSizeStructWithEmbeddedNonFixedSizedStruct struct {
 	NonFixedSizeStructWithInterface
 }
 
-func TestIsFixedSize(t *testing.T) {
-	var k any = FixedSizeStruct{}
-	if !isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered fixed size", k)
-	}
+type NonFixedSizeStructWithNonFixedSizeStructAndBlankField struct {
+	//lint:ignore U1000 accessed via reflection
+	a NonFixedSizeStructWithString
+	_ uint16
+}
 
-	k = FixedSizeEmptyStruct{}
-	if !isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered fixed size", k)
-	}
-
-	k = [4]int{}
-	if !isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered fixed size", k)
-	}
-
-	k = (*[]int)(nil)
-	if !isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered fixed size", k)
-	}
-
-	k = [4]string{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = NonFixedSizeStructWithInterface{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = NonFixedSizeStructWithString{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = NonFixedSizeStructWithNonFixedSizeStruct{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = NonFixedSizeStructWithEmbeddedInterface{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = NonFixedSizeStructWithEmbeddedNonFixedSizedStruct{}
-	if isFixedSize(reflect.TypeOf(k)) {
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
-
-	k = FixedSizeStruct{}
-	if isFixedSize(reflect.TypeOf(&k).Elem()) {
-		// reflect.TypeOf(&k).Elem() is type any (an Interface), which is
-		// non-fixed size even though we know the dynamic type is fixed size.
-		t.Errorf("Expected type %T to be considered non-fixed size", k)
-	}
+type FixedSizeStructWithBlankField struct {
+	_ uint16
+	a uint64
+	_ [5]uint16
+	b [3]int32
 }
 
 func ComparableMapHasherTest[K comparable](v1, v2 K) func(t *testing.T) {
@@ -133,10 +88,10 @@ func ComparableMapHasherTest[K comparable](v1, v2 K) func(t *testing.T) {
 		if v1 == v2 {
 			t.Errorf("Expected v1 != v2; Got v1 == v2 (v1: %v, v2: %v)", v1, v2)
 		}
-		if h1, h2 := mh.Hash(&i), mh.Hash(&j); h1 != h2 {
+		if h1, h2 := mh(&i), mh(&j); h1 != h2 {
 			t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", i, j, h1, h2)
 		}
-		if h1, h2 := mh.Hash(&j), mh.Hash(&k); h1 == h2 {
+		if h1, h2 := mh(&j), mh(&k); h1 == h2 {
 			t.Errorf("Expected Hash(%v) != Hash(%v); Got Hash(%[1]v) == Hash(%[2]v) == %v", j, k, h1)
 		}
 	}
@@ -161,18 +116,116 @@ func TestComparableMapHasher(t *testing.T) {
 	t.Run("non-fixed-size-struct", ComparableMapHasherTest(NonFixedSizeStructWithEmbeddedInterface{Embedded{a: 2}}, NonFixedSizeStructWithEmbeddedInterface{Embedded2{a: 2}}))
 	t.Run("struct-with-unexported-interface", ComparableMapHasherTest(struct{ a any }{a: "a"}, struct{ a any }{a: 1.0}))
 	t.Run("chan", ComparableMapHasherTest(make(chan int), make(chan int)))
+	t.Run("non-fixed-size-struct-with-different-blank-fields", func(t *testing.T) {
+		v1 := NonFixedSizeStructWithNonFixedSizeStructAndBlankField{a: NonFixedSizeStructWithString{a: "a"}}
+		v2 := NonFixedSizeStructWithNonFixedSizeStructAndBlankField{a: NonFixedSizeStructWithString{a: "a"}}
+		val := reflect.ValueOf(&v1).Elem().FieldByName("_")
+		val = reflect.NewAt(val.Type(), val.Addr().UnsafePointer()).Elem()
+		val.SetUint(8)
+		val = reflect.ValueOf(&v2).Elem().FieldByName("_")
+		val = reflect.NewAt(val.Type(), val.Addr().UnsafePointer()).Elem()
+		val.SetUint(16)
+
+		mh := ComparableMapHasher[NonFixedSizeStructWithNonFixedSizeStructAndBlankField]()
+
+		if v1 != v2 {
+			t.Errorf("Expected v1 == v2; Got v1 != v2 (v1: %v, v2: %v)", v1, v2)
+		}
+		if h1, h2 := mh(&v1), mh(&v2); h1 != h2 {
+			t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v1, v2, h1, h2)
+		}
+	})
+	t.Run("fixed-size-struct-with-different-blank-fields", func(t *testing.T) {
+		v1 := FixedSizeStructWithBlankField{a: 64, b: [3]int32{1, 2, 3}}
+		v2 := FixedSizeStructWithBlankField{a: 64, b: [3]int32{1, 2, 3}}
+		val := reflect.ValueOf(&v1).Elem().Field(0)
+		val = reflect.NewAt(val.Type(), val.Addr().UnsafePointer()).Elem()
+		val.SetUint(8)
+		val = reflect.ValueOf(&v2).Elem().Field(0)
+		val = reflect.NewAt(val.Type(), val.Addr().UnsafePointer()).Elem()
+		val.SetUint(16)
+
+		mh := ComparableMapHasher[FixedSizeStructWithBlankField]()
+
+		if v1 != v2 {
+			t.Errorf("Expected v1 == v2; Got v1 != v2 (v1: %v, v2: %v)", v1, v2)
+		}
+		if h1, h2 := mh(&v1), mh(&v2); h1 != h2 {
+			t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v1, v2, h1, h2)
+		}
+	})
+
+	t.Run("float32-positive-negative-zero", func(t *testing.T) {
+		v1 := float32(+0.0)
+		v2 := float32(math.Copysign(0.0, -1.0))
+
+		mh := ComparableMapHasher[float32]()
+
+		if v1 != v2 {
+			t.Errorf("Expected v1 == v2; Got v1 != v2 (v1: %v, v2: %v)", v1, v2)
+		}
+		if h1, h2 := mh(&v1), mh(&v2); h1 != h2 {
+			t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v1, v2, h1, h2)
+		}
+
+		if !math.Signbit(float64(v2)) {
+			t.Errorf("Expected math.Signbit(float64(v2)) == true; Got false")
+		}
+	})
+
+	t.Run("float64-positive-negative-zero", func(t *testing.T) {
+		v1 := float64(+0.0)
+		v2 := float64(math.Copysign(0.0, -1.0))
+
+		mh := ComparableMapHasher[float64]()
+
+		if v1 != v2 {
+			t.Errorf("Expected v1 == v2; Got v1 != v2 (v1: %v, v2: %v)", v1, v2)
+		}
+		if h1, h2 := mh(&v1), mh(&v2); h1 != h2 {
+			t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v1, v2, h1, h2)
+		}
+
+		if !math.Signbit(v2) {
+			t.Errorf("Expected math.Signbit(v2) == true; Got false")
+		}
+	})
+
+	t.Run("float32-NaN-different-hashes", func(t *testing.T) {
+		v := float32(math.NaN())
+
+		mh := ComparableMapHasher[float32]()
+
+		if v == v {
+			t.Errorf("Expected v != v; Got v == v (v: %v)", v)
+		}
+
+		if h1, h2 := mh(&v), mh(&v); h1 == h2 {
+			t.Errorf("Expected Hash(%v) != Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v, v, h1, h2)
+		}
+	})
+
+	t.Run("float64-NaN-different-hashes", func(t *testing.T) {
+		v := float64(math.NaN())
+
+		mh := ComparableMapHasher[float64]()
+
+		if h1, h2 := mh(&v), mh(&v); h1 == h2 {
+			t.Errorf("Expected Hash(%v) != Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v, v, h1, h2)
+		}
+	})
 }
 
 func TestComparableMapHasherPanicsForNonComparableDynamicTypes(t *testing.T) {
 	defer func() {
 		msg := recover()
-		expected := "Dynamic type func() is not comparable"
+		expected := "runtime error: hash of unhashable type func()"
 		if msg == nil || fmt.Sprint(msg) != expected {
 			t.Errorf(`Expected panic(%q); Got panic("%v")`, expected, msg)
 		}
 	}()
 	mh := ComparableMapHasher[struct{ a any }]()
-	mh.Hash(&struct{ a any }{a: func() {}})
+	mh(&struct{ a any }{a: func() {}})
 }
 
 type SIntWrapper[T constraints.Signed] struct {
@@ -211,21 +264,21 @@ func TestHashableKeyMapHasher(t *testing.T) {
 	if !v1.Equals(v2) || !v2.Equals(v1) {
 		t.Errorf("Expected v1.Equals(v2) == true; Got false (v1: %v, v2: %v)", v1, v2)
 	}
-	if h1, h2 := mh.Hash(&v1), mh.Hash(&v2); h1 != h2 {
+	if h1, h2 := mh(&v1), mh(&v2); h1 != h2 {
 		t.Errorf("Expected Hash(%v) == Hash(%v); Got Hash(%[1]v) == %[3]v, Hash(%[2]v) == %[4]v", v1, v2, h1, h2)
 	}
 
 	if v1.Equals(v3) || v3.Equals(v1) {
 		t.Errorf("Expected v1.Equals(v3) == false; Got true (v1: %v, v3: %v)", v1, v3)
 	}
-	if h1, h2 := mh.Hash(&v1), mh.Hash(&v3); h1 == h2 {
+	if h1, h2 := mh(&v1), mh(&v3); h1 == h2 {
 		t.Errorf("Expected Hash(%v) != Hash(%v); Got Hash(%[1]v) == Hash(%[2]v) == %v", v1, v3, h1)
 	}
 
 	if v2.Equals(v3) || v3.Equals(v2) {
 		t.Errorf("Expected v2.Equals(v3) == false; Got true (v2: %v, v3: %v)", v2, v3)
 	}
-	if h1, h2 := mh.Hash(&v2), mh.Hash(&v3); h1 == h2 {
+	if h1, h2 := mh(&v2), mh(&v3); h1 == h2 {
 		t.Errorf("Expected Hash(%v) != Hash(%v); Got Hash(%[1]v) == Hash(%[2]v) == %v", v2, v3, h1)
 	}
 }
